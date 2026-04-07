@@ -1,151 +1,228 @@
 """
-Instagram Video Fetcher — Playwright Headless (No Login Required)
+Instagram Video Fetcher — CDP + Headless Hybrid
 
-从 Instagram 标签探索页抓取热门视频，无需登录。
-使用 Playwright headless Chromium 渲染 JS 页面，直接获取视频 CDN 链接。
+最优方案：
+  1. CDP（登录态）获取帖子链接 + 文案/评论（24+ 帖子）
+  2. Headless（无登录）下载完整 MP4 视频文件（12 个）
+
+CDP 启动方式（需先关闭所有 Chrome 窗口）：
+    /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
+        --remote-debugging-port=9222 \\
+        --user-data-dir="/tmp/chrome_cdp_data" \\
+        --no-first-run
 
 Usage:
-    python fetch_instagram_video.py seedance --num 3 --output ig_videos
+    # 完整流程：CDP 元数据 + Headless 视频
+    python fetch_instagram_video.py seedance --num 5
+
+    # 仅 Headless（无需 Chrome）
+    python fetch_instagram_video.py seedance --num 3 --headless-only
+
+    # 仅 CDP 元数据（不下载视频）
+    python fetch_instagram_video.py seedance --cdp-only
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import urllib.request
-from typing import List, Dict
+from pathlib import Path
+from typing import Dict, List, Optional
 
 
-def fetch_tag_videos(
+def _download_video(src: str, filepath: str) -> int:
+    req = urllib.request.Request(
+        src,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.instagram.com/",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read()
+        with open(filepath, "wb") as f:
+            f.write(data)
+    return len(data)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CDP: 登录态获取帖子链接 + 文案
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def fetch_cdp_metadata(
     tag: str,
-    num_videos: int = 3,
+    cdp_url: str = "http://localhost:9222",
+    scroll_count: int = 3,
+    caption_count: int = 5,
+) -> Dict:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(cdp_url)
+        context = browser.contexts[0] if browser.contexts else browser.new_context()
+        page = context.new_page()
+
+        page.goto(
+            f"https://www.instagram.com/explore/tags/{tag}/",
+            wait_until="networkidle",
+            timeout=20000,
+        )
+        page.wait_for_timeout(3000)
+
+        for i in range(scroll_count):
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(1500)
+
+        post_links = page.evaluate(
+            """() => {
+            const links = [];
+            document.querySelectorAll('a').forEach(a => {
+                if (a.href && (a.href.includes('/reel/') || a.href.includes('/p/')))
+                    links.push(a.href);
+            });
+            return [...new Set(links)];
+        }"""
+        )
+
+        captions = []
+        for i, link in enumerate(post_links[:caption_count]):
+            try:
+                page.goto(link, wait_until="networkidle", timeout=15000)
+                page.wait_for_timeout(2000)
+                caption = page.evaluate(
+                    """() => {
+                    const spans = document.querySelectorAll('span');
+                    let longest = '';
+                    spans.forEach(s => {
+                        const t = s.innerText || '';
+                        if (t.length > longest.length && t.length > 20) longest = t;
+                    });
+                    return longest.substring(0, 500);
+                }"""
+                )
+                captions.append({"url": link, "caption": caption})
+            except Exception:
+                captions.append({"url": link, "caption": ""})
+
+        page.close()
+
+    return {"tag": tag, "post_links": post_links, "captions": captions}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Headless: 无登录下载完整 MP4
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def fetch_headless_videos(
+    tag: str,
+    num_videos: int = 5,
     output_dir: str = "ig_videos",
-    timeout: int = 15000,
-) -> List[Dict[str, str]]:
+) -> List[Dict]:
     from playwright.sync_api import sync_playwright
 
     os.makedirs(output_dir, exist_ok=True)
-    results: List[Dict[str, str]] = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
-
-        url = f"https://www.instagram.com/explore/tags/{tag}/"
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        page.goto(
+            f"https://www.instagram.com/explore/tags/{tag}/",
+            wait_until="domcontentloaded",
+            timeout=15000,
+        )
         page.wait_for_timeout(3000)
 
-        data = page.evaluate(
+        video_srcs = page.evaluate(
             """() => {
-            const reels = [];
-            document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]').forEach(a => {
-                if (a.href) reels.push(a.href);
-            });
-            const videos = [];
+            const vids = [];
             document.querySelectorAll('video').forEach(v => {
-                videos.push({src: v.src || '', poster: v.poster || ''});
+                if (v.src) vids.push(v.src);
             });
-            return {reels: [...new Set(reels)], videos};
+            return vids;
         }"""
         )
 
-        reel_links = data.get("reels", [])
-        video_elements = data.get("videos", [])
-
-        for i, vid in enumerate(video_elements[:num_videos]):
-            src = vid.get("src", "")
-            if not src:
-                continue
-
-            filename = f"{tag}_{i}.mp4"
-            filepath = os.path.join(output_dir, filename)
-            reel_url = reel_links[i] if i < len(reel_links) else ""
-
+        results = []
+        for i, src in enumerate(video_srcs[:num_videos]):
+            filepath = os.path.join(output_dir, f"{tag}_{i}.mp4")
             try:
-                req = urllib.request.Request(
-                    src,
-                    headers={
-                        "User-Agent": "Mozilla/5.0",
-                        "Referer": "https://www.instagram.com/",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    with open(filepath, "wb") as f:
-                        f.write(resp.read())
-
-                size_kb = os.path.getsize(filepath) / 1024
-                results.append(
-                    {
-                        "index": i,
-                        "path": filepath,
-                        "size_kb": round(size_kb),
-                        "reel_url": reel_url,
-                        "cdn_url": src[:80] + "...",
-                    }
-                )
-                print(f"  [{i}] {size_kb:.0f}KB -> {filepath}")
+                size = _download_video(src, filepath)
+                results.append({"index": i, "path": filepath, "size_kb": round(size / 1024)})
+                print(f"  [{i}] {size / 1024:.0f}KB -> {filepath}")
             except Exception as e:
-                print(f"  [{i}] Download failed: {e}")
+                print(f"  [{i}] Failed: {e}")
 
         browser.close()
 
     return results
 
 
-def fetch_tag_metadata(tag: str, timeout: int = 15000) -> Dict:
-    """Fetch tag page metadata without downloading videos."""
-    from playwright.sync_api import sync_playwright
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 组合流程
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def fetch_hybrid(
+    tag: str,
+    num_videos: int = 5,
+    output_dir: str = "ig_videos",
+    cdp_url: str = "http://localhost:9222",
+    scroll_count: int = 3,
+    caption_count: int = 5,
+) -> Dict:
+    """
+    Step 1: CDP 获取帖子链接 + 文案（需要已启动带 debug 端口的 Chrome）
+    Step 2: 关闭 CDP 连接
+    Step 3: Headless 下载完整视频
+    """
+    metadata = None
+    try:
+        print(f"[CDP] Fetching metadata for #{tag}...")
+        metadata = fetch_cdp_metadata(tag, cdp_url, scroll_count, caption_count)
+        print(f"[CDP] {len(metadata['post_links'])} posts, {len(metadata['captions'])} captions")
+    except Exception as e:
+        print(f"[CDP] Not available ({e}), using headless only")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
+    print(f"\n[Headless] Downloading {num_videos} videos for #{tag}...")
+    videos = fetch_headless_videos(tag, num_videos, output_dir)
+    print(f"[Headless] {len(videos)} videos downloaded")
 
-        url = f"https://www.instagram.com/explore/tags/{tag}/"
-        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-        page.wait_for_timeout(3000)
-
-        data = page.evaluate(
-            """() => {
-            const reels = [];
-            document.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]').forEach(a => {
-                if (a.href) reels.push(a.href);
-            });
-            const videoCount = document.querySelectorAll('video').length;
-            const title = document.title || '';
-            return {reels: [...new Set(reels)], videoCount, title};
-        }"""
-        )
-
-        browser.close()
-
-    return {
+    result = {
         "tag": tag,
-        "title": data.get("title", ""),
-        "reel_count": len(data.get("reels", [])),
-        "video_count": data.get("videoCount", 0),
-        "reel_urls": data.get("reels", []),
+        "metadata": metadata,
+        "videos": videos,
     }
 
+    output_json = os.path.join(output_dir, f"{tag}_data.json")
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    print(f"\n[Saved] {output_json}")
 
+    return result
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CLI
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch Instagram videos by tag")
-    parser.add_argument("tag", help="Instagram tag to search")
-    parser.add_argument("--num", type=int, default=3, help="Number of videos")
+    parser = argparse.ArgumentParser(description="Fetch Instagram videos (hybrid)")
+    parser.add_argument("tag", help="Instagram tag")
+    parser.add_argument("--num", type=int, default=5, help="Number of videos to download")
     parser.add_argument("--output", default="ig_videos", help="Output directory")
-    parser.add_argument("--metadata-only", action="store_true", help="Only fetch metadata")
+    parser.add_argument("--cdp-url", default="http://localhost:9222")
+    parser.add_argument("--scroll", type=int, default=3)
+    parser.add_argument("--captions", type=int, default=5, help="Number of captions to fetch")
+    parser.add_argument("--headless-only", action="store_true", help="Skip CDP, headless only")
+    parser.add_argument("--cdp-only", action="store_true", help="Only fetch CDP metadata")
     args = parser.parse_args()
 
-    if args.metadata_only:
-        meta = fetch_tag_metadata(args.tag)
-        print(f"Tag: #{meta['tag']}")
-        print(f"Title: {meta['title']}")
-        print(f"Videos found: {meta['video_count']}")
-        print(f"Reel links: {meta['reel_count']}")
-        for url in meta["reel_urls"][:5]:
-            print(f"  {url}")
+    if args.headless_only:
+        videos = fetch_headless_videos(args.tag, args.num, args.output)
+        print(f"Done. {len(videos)} videos.")
+    elif args.cdp_only:
+        meta = fetch_cdp_metadata(args.tag, args.cdp_url, args.scroll, args.captions)
+        print(json.dumps(meta, ensure_ascii=False, indent=2))
     else:
-        print(f"Fetching top {args.num} videos from #{args.tag}...")
-        results = fetch_tag_videos(args.tag, args.num, args.output)
-        print(f"\nDownloaded {len(results)} videos to {args.output}/")
+        fetch_hybrid(
+            args.tag, args.num, args.output,
+            args.cdp_url, args.scroll, args.captions,
+        )

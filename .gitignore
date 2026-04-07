@@ -1,0 +1,7 @@
+*.mp4
+.env
+frames/
+ig_frames/
+ig_videos/
+skill_output.json
+trend_data.json
