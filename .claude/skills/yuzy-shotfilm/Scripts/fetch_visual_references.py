@@ -35,6 +35,15 @@ import urllib.request
 from typing import Dict, List, Optional, Tuple
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Allowed sources — ONLY these 3 platforms
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ALLOWED_DOMAINS = [
+    "instagram.com",
+    "higgsfield.ai",
+    "freepik.com",
+]
+
 STRATEGY_MAP = {
     "ai_video_generation": {
         "keywords": ["video generat", "text-to-video", "image-to-video", "video model",
@@ -42,6 +51,7 @@ STRATEGY_MAP = {
         "sources": [
             {"type": "website", "name": "Higgsfield Seedance 2.0", "url": "https://www.higgsfield.ai/seedance/2.0"},
             {"type": "website", "name": "Higgsfield Community", "url": "https://www.higgsfield.ai/seedance-2-community"},
+            {"type": "website", "name": "Freepik AI Video", "url": "https://www.freepik.com/ai/video-generator"},
             {"type": "instagram_tag", "tag": "seedance"},
             {"type": "instagram_tag", "tag": "aicinematic"},
         ],
@@ -50,30 +60,30 @@ STRATEGY_MAP = {
         "keywords": ["headshot", "portrait", "selfie", "profile picture", "face smooth",
                      "skin smooth", "retouching", "blemish", "professional photo"],
         "sources": [
-            {"type": "website", "name": "HeadshotPro", "url": "https://www.headshotpro.com"},
-            {"type": "website", "name": "Aragon AI", "url": "https://www.aragon.ai"},
-            {"type": "website", "name": "Secta AI", "url": "https://secta.ai"},
-            {"type": "website", "name": "Dreamwave AI", "url": "https://dreamwave.ai"},
-            {"type": "website", "name": "Facetune", "url": "https://facetuneapp.com/features"},
+            {"type": "website", "name": "Higgsfield Popcorn", "url": "https://www.higgsfield.ai/popcorn"},
+            {"type": "website", "name": "Higgsfield Recast", "url": "https://www.higgsfield.ai/blog/AI-Face-Character-Swap-in-Video-Photo-PRO-Guide"},
+            {"type": "website", "name": "Freepik AI Portrait", "url": "https://www.freepik.com/ai/image-generator"},
             {"type": "instagram_tag", "tag": "aibeauty"},
             {"type": "instagram_tag", "tag": "aiportrait"},
+            {"type": "instagram_tag", "tag": "aiheadshotgenerator"},
         ],
     },
     "ai_image_generation": {
         "keywords": ["image generat", "text-to-image", "art generat", "ai art",
                      "illustration", "design", "creative"],
         "sources": [
-            {"type": "website", "name": "Midjourney Showcase", "url": "https://www.midjourney.com/showcase"},
-            {"type": "website", "name": "Freepik AI", "url": "https://www.freepik.com/ai/image-generator"},
+            {"type": "website", "name": "Higgsfield Popcorn", "url": "https://www.higgsfield.ai/popcorn"},
+            {"type": "website", "name": "Freepik AI Image", "url": "https://www.freepik.com/ai/image-generator"},
             {"type": "instagram_tag", "tag": "aiart"},
+            {"type": "instagram_tag", "tag": "midjourney"},
         ],
     },
     "ai_background_removal": {
         "keywords": ["background remov", "background replac", "bg remov", "cutout",
                      "transparent", "background chang"],
         "sources": [
-            {"type": "website", "name": "Remove.bg", "url": "https://www.remove.bg"},
-            {"type": "website", "name": "Canva BG Remover", "url": "https://www.canva.com/features/background-remover/"},
+            {"type": "website", "name": "Freepik BG Remover", "url": "https://www.freepik.com/ai/background-remover"},
+            {"type": "website", "name": "Higgsfield Recast", "url": "https://www.higgsfield.ai/blog/AI-Face-Character-Swap-in-Video-Photo-PRO-Guide"},
             {"type": "instagram_tag", "tag": "backgroundremover"},
         ],
     },
@@ -81,7 +91,8 @@ STRATEGY_MAP = {
         "keywords": ["avatar", "character creat", "virtual", "anime", "cartoon",
                      "stylized", "3d character"],
         "sources": [
-            {"type": "website", "name": "Higgsfield Influencer", "url": "https://www.higgsfield.ai/blog/AI-Influencer-Studio-Guide-Build-AI-Character"},
+            {"type": "website", "name": "Higgsfield Influencer Studio", "url": "https://www.higgsfield.ai/blog/AI-Influencer-Studio-Guide-Build-AI-Character"},
+            {"type": "website", "name": "Freepik AI Avatar", "url": "https://www.freepik.com/ai/image-generator"},
             {"type": "instagram_tag", "tag": "aiavatar"},
         ],
     },
@@ -89,12 +100,17 @@ STRATEGY_MAP = {
         "keywords": ["audio", "music", "voice", "sound", "song", "singing",
                      "text-to-speech", "tts"],
         "sources": [
-            {"type": "website", "name": "Suno AI", "url": "https://suno.com"},
-            {"type": "website", "name": "ElevenLabs", "url": "https://elevenlabs.io"},
+            {"type": "website", "name": "Higgsfield Audio", "url": "https://www.higgsfield.ai/seedance/2.0"},
+            {"type": "website", "name": "Freepik AI Audio", "url": "https://www.freepik.com/ai/music-generator"},
             {"type": "instagram_tag", "tag": "aimusic"},
         ],
     },
 }
+
+
+def _is_allowed_source(url: str) -> bool:
+    """Check if a URL belongs to one of the 3 allowed platforms."""
+    return any(domain in url for domain in ALLOWED_DOMAINS)
 
 
 def detect_product_type(doc_text: str) -> Tuple[str, float]:
@@ -123,6 +139,10 @@ def _download(url: str, filepath: str) -> bool:
 
 
 def fetch_website(url: str, num: int = 3, output_dir: str = "visual_refs") -> List[str]:
+    if not _is_allowed_source(url):
+        print(f"    ⛔ Blocked: {url} — not in allowed domains {ALLOWED_DOMAINS}")
+        return []
+
     from playwright.sync_api import sync_playwright
 
     os.makedirs(output_dir, exist_ok=True)
@@ -148,11 +168,12 @@ def fetch_website(url: str, num: int = 3, output_dir: str = "visual_refs") -> Li
             }""")
 
             for i, src in enumerate(video_urls[:num]):
-                idx = len(downloaded)
-                filepath = os.path.join(output_dir, f"web_{idx}.mp4")
+                import hashlib
+                url_hash = hashlib.md5(src.encode()).hexdigest()[:6]
+                filepath = os.path.join(output_dir, f"web_{url_hash}.mp4")
                 if _download(src, filepath):
                     downloaded.append(filepath)
-                    print(f"    [{idx}] {os.path.getsize(filepath)/1024:.0f}KB -> {filepath}")
+                    print(f"    [{len(downloaded)-1}] {os.path.getsize(filepath)/1024:.0f}KB -> {filepath}")
         except Exception as e:
             print(f"    Error: {str(e)[:60]}")
         browser.close()
@@ -183,11 +204,12 @@ def fetch_instagram(tag: str, num: int = 3, output_dir: str = "visual_refs") -> 
             }""")
 
             for i, src in enumerate(video_urls[:num]):
-                idx = len(downloaded)
-                filepath = os.path.join(output_dir, f"ig_{tag}_{idx}.mp4")
+                import hashlib
+                url_hash = hashlib.md5(src.encode()).hexdigest()[:6]
+                filepath = os.path.join(output_dir, f"ig_{tag}_{url_hash}.mp4")
                 if _download(src, filepath):
                     downloaded.append(filepath)
-                    print(f"    [{idx}] {os.path.getsize(filepath)/1024:.0f}KB -> {filepath}")
+                    print(f"    [{len(downloaded)-1}] {os.path.getsize(filepath)/1024:.0f}KB -> {filepath}")
         except Exception as e:
             print(f"    Error: {str(e)[:60]}")
         browser.close()

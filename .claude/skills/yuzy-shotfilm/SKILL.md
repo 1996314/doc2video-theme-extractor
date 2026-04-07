@@ -75,16 +75,26 @@ Production-Ready Output
 | `generate_seedance_prompt.py` | 九宫格 → Seedance 2.0 prompt |
 | `validate_prompt.py` | prompt 校验（长度/时序/镜头/冲突） |
 
-## 动态搜索策略
+## 允许的视频来源（仅限 3 个平台）
 
-| 产品类型 | 优先来源 |
-|---------|---------|
-| ai_video_generation | Higgsfield Seedance 2.0 → Community → #seedance |
-| ai_portrait_headshot | HeadshotPro → Aragon → Secta → Dreamwave → #aibeauty |
-| ai_image_generation | Midjourney → Freepik → #aiart |
-| ai_background_removal | Remove.bg → Canva → #backgroundremover |
-| ai_avatar | Higgsfield Influencer → #aiavatar |
-| ai_audio_music | Suno → ElevenLabs → #aimusic |
+所有视频素材只能从以下 3 个平台抓取，其他来源会被自动拒绝：
+
+| # | 平台 | 域名 | 用途 |
+|---|------|------|------|
+| 1 | **Instagram** | instagram.com | 标签页热门视频（Playwright headless） |
+| 2 | **Higgsfield** | higgsfield.ai | Seedance 2.0 showcase、社区精选、Popcorn、Recast |
+| 3 | **Freepik** | freepik.com | AI 图像/视频/音频生成器产品页 |
+
+## 动态搜索策略（限定在 3 个平台内）
+
+| 产品类型 | 来源 |
+|---------|------|
+| ai_video_generation | Higgsfield Seedance 2.0 → Higgsfield Community → Freepik AI Video → #seedance → #aicinematic |
+| ai_portrait_headshot | Higgsfield Popcorn → Higgsfield Recast → Freepik AI Portrait → #aibeauty → #aiportrait |
+| ai_image_generation | Higgsfield Popcorn → Freepik AI Image → #aiart → #midjourney |
+| ai_background_removal | Freepik BG Remover → Higgsfield Recast → #backgroundremover |
+| ai_avatar | Higgsfield Influencer Studio → Freepik AI Avatar → #aiavatar |
+| ai_audio_music | Higgsfield Audio → Freepik AI Audio → #aimusic |
 
 ## 安装
 
