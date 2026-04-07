@@ -1,141 +1,113 @@
 ---
 name: "Doc2Video Theme Extractor"
-description: "将文档（Google Doc 或 Word）解析为视频创意主题，结合 Instagram 实时趋势和 AI 创作热门风格，生成具有视觉冲击力的短描述和人物风格，用于 AI 视频或图像生成。"
+description: "解析文档生成视频主题 → Playwright 抓取 Instagram 热门视频 → OpenCV 抽帧 → Vision 帧分析 → 主视觉 prompt → 九宫格连续描述 → Seedance 2.0 连续视频 prompt。全链路自动化，中英双语输出。"
 ---
 
-# Doc2Video Theme Extractor Skill
-
-## 描述
-Doc2Video Theme Extractor 是一个 Claude Skill，用于将文档内容解析为视频创意主题。它通过实时抓取 Instagram 标签页和 AI 创作平台的热门趋势，结合文档内容生成具有视觉冲击力的短描述和人物风格，便于直接用于 AI 视频或图像生成。
+# Doc2Video Skill（视觉驱动扩展版）
 
 ## 功能
+1. 文档解析：提取主题、功能点、核心卖点
+2. **Playwright 视频抓取**：Headless Chromium 访问 Instagram 标签页，无需登录直接获取视频 CDN 链接并下载
+3. **OpenCV 抽帧**：每个视频提取 9 个关键帧
+4. **Vision 帧分析**：用 AI Vision 分析帧内容，输出视觉结构（主体、镜头、光线、风格）
+5. 主视觉 prompt：融合帧分析结果，输出中英双语 prompt
+6. 九宫格连续文本 prompt：16:9 一张图，9 panel 连续叙事
+7. Seedance 2.0 连续视频 prompt：极简格式（camera + subject + action），按 Higgsfield 官方规范
+8. 校验：自动使用 `validate_prompt` 校验生成 prompt
 
-### 1. 文档解析
-- 支持 Google Doc URL（通过 `/export?format=txt` 导出纯文本）或 Word 文档。
-- 提取文档核心功能点、主题和需要强调的内容。
-
-### 2. Instagram 实时趋势抓取
-通过抓取 Instagram 公开标签探索页获取真实趋势数据：
-
-**可抓取的标签页（无需登录）：**
-- `https://www.instagram.com/explore/tags/{tag}/`
-- 推荐标签：`aivideo`、`aicinematic`、`aifilmmaking`、`aiart`、`aimovie`、`aishortfilm`
-
-**每个标签页可获取的数据：**
-- 标签下的总 Reels 数量（如 `#aivideo` = 1.8M reels）
-- 关联热门标签列表
-- 热门帖子预览：账号名、播放量、完整文案描述
-- 标签定义描述
-
-**获取完整视频内容（需浏览器自动化）：**
-- 单个帖子页面（`/reel/xxx/`）需要登录才能查看完整视频
-- 使用 browser-use 子代理可以登录 Instagram 并浏览完整内容
-- 流程：登录 → 导航到标签页 → 打开热门帖 → 截图/提取描述
-
-### 3. 补充趋势来源
-- **WebSearch**：搜索 `AI video trends {year}` 等关键词获取行业分析文章
-- **WebSearch + site:instagram.com**：通过搜索引擎间接获取 Instagram 帖子信息
-- **WebFetch**：抓取 Higgsfield、Runway、Freepik 等 AI 工具平台的公开页面
-
-### 4. 视频主题生成
-- 根据文档内容与趋势生成视觉冲击力的视频主题。
-- 输出 20–50 字的主视觉描述。
-- 推荐人物风格（写实、卡通、赛博朋克、未来科技、二次元等）。
-
-### 5. 关键词输出
-- 可选生成关键词列表，用于 AI 图像生成参考。
-
-## 执行流程
+## 完整链路
 
 ```
-用户输入文档 URL
-       │
-       ▼
-┌──────────────────┐
-│  Step 1: 文档解析  │  WebFetch → Google Doc export URL → 提取纯文本
-└──────┬───────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  Step 2: Instagram 趋势抓取   │  WebFetch → 标签探索页（公开数据）
-│  ├─ #aivideo (1.8M reels)    │  提取：帖量、热门帖文案、播放量
-│  ├─ #aicinematic (15K reels) │
-│  ├─ #aifilmmaking            │
-│  └─ 更多相关标签...            │
-└──────┬───────────────────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  Step 2b: 完整视频内容（可选）  │  browser-use → 登录 Instagram
-│  需要浏览器自动化 + 账号登录    │  打开热门帖 → 截图 → 提取视觉风格
-└──────┬───────────────────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  Step 3: 补充趋势              │  WebSearch → 行业分析文章
-│  AI 视频风格、平台热度数据      │  获取互动率、流行特效、工具链
-└──────┬───────────────────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│  Step 4: 交叉匹配 + 主题生成   │  文档功能 × 趋势数据 → 视频主题
-│  每个功能点对应一个主题         │  输出：标题 + 描述 + 人物风格 + 关键词
-└──────────────────────────────┘
+文档 URL
+  │ WebFetch (export?format=txt)
+  ▼
+提取功能点
+  │
+  ▼
+Playwright headless Chromium ──→ Instagram 标签页（无需登录）
+  │ 获取视频 CDN 链接（12个/页）
+  │ urllib 下载 .mp4
+  ▼
+OpenCV 抽帧 ──→ 9 帧/视频
+  │
+  ▼
+Claude Vision 帧分析 ──→ 视觉结构 JSON
+  │ (主体、镜头路径、光线、风格、叙事弧线)
+  ▼
+generate_main_visual() ──→ 中英双语 prompt
+  ▼
+generate_storyboard() ──→ 九宫格连续叙事 prompt
+  ▼
+人工确认风格 ✅
+  ▼
+generate_seedance_prompt() ──→ Seedance 2.0 极简 prompt
+  │ Popcorn 长 prompt (图片) + Seedance 短 prompt (视频)
+  │ @Image / @Video / @Audio 引用
+  ▼
+Production-Ready Output
 ```
 
 ## 输入
 | 输入 | 类型 | 描述 |
 |------|------|------|
-| 文档链接/文件 | Google Doc URL / Word | 待解析的文档 |
-| 目标风格 | 可选 | 视频整体风格，如未来科技、梦幻、时尚等 |
-| 输出字数 | 可选 | 描述字数范围，默认 20–50 |
-| Instagram 标签 | 可选 | 自定义要抓取的 Instagram 标签列表 |
-| 浏览器模式 | 可选 | 是否使用 browser-use 获取完整视频内容，默认 false |
+| 文档 URL / 文件 | Google Doc / Word | 待解析主题 |
+| 风格 | str | 视频整体风格 |
+| 关键词 / 标签 | list | 用于 Instagram 抓取的标签（如 seedance, higgsfield） |
+| 驱动逻辑 | str | 空间 / 动作 / 动能 / 形态 / 意识 |
+| 视频文件 | .mp4 | 可选：用户直接提供视频跳过抓取步骤 |
 
 ## 输出
 | 输出 | 类型 | 描述 |
 |------|------|------|
-| 视频主题 | 字符串 | 简洁有力的主题标题 |
-| 主视觉描述 | 字符串 | 20–50 字描述，用于生成视频主视觉 |
-| 人物风格 | 字符串 | 推荐的人物风格 |
-| 关键词列表 | 列表 | 可选的视觉元素关键词，用于 AI 生成参考 |
-| 趋势来源 | 列表 | 引用的 Instagram 标签数据和文章来源 |
+| 视觉结构 | JSON | 帧分析结果：主体、镜头、光线、风格、叙事 |
+| 主视觉 prompt | dict | {"cn": ..., "en": ...} |
+| 九宫格 prompt | dict | {"cn": ..., "en": ...} — 一条连续叙事 |
+| Seedance prompt | str | 极简格式：Popcorn 长 prompt + Seedance 短 prompt |
+| 校验报告 | dict | 各阶段校验结果 |
 
-## Instagram 标签抓取参考
+## 脚本说明
 
-### 已验证可抓取的标签（2026-04）
-| 标签 | Reels 数量 | 特点 |
-|------|-----------|------|
-| `#aivideo` | 1.8M | 最大 AI 视频标签，覆盖所有类型 |
-| `#aicinematic` | 15K | 电影级 AI 视频，含高播放量帖子（66.4M+）|
-| `#aifilmmaking` | — | 专业创作者聚集，含工具链讨论（Higgsfield、Kling、Runway）|
-| `#aiart` | — | AI 艺术创作，覆盖图像和视频 |
+| 脚本 | 功能 | 依赖 |
+|------|------|------|
+| `fetch_instagram_video.py` | Playwright headless 抓取 Instagram 视频 | playwright, chromium |
+| `extract_frames.py` | OpenCV 抽取关键帧 | opencv-python-headless |
+| `analyze_frames.py` | AI Vision 帧分析 → 视觉结构 | Claude Vision / OpenAI Vision |
+| `generate_main_visual.py` | 帧分析 → 主视觉 prompt | validate_prompt |
+| `generate_storyboard.py` | 主视觉 → 九宫格连续叙事 | validate_prompt |
+| `generate_seedance_prompt.py` | 九宫格 → Seedance 2.0 连续 prompt | validate_prompt |
+| `run_pipeline.py` | 全流程编排 | 以上所有 |
 
-### 从标签页可提取的趋势信号
-- **播放量排名**：识别当前最火的视觉风格
-- **文案中的工具提及**：了解创作者实际使用的 AI 工具
-- **关联标签**：发现新兴趋势标签
-- **内容主题**：识别热门内容类型（故事、教程、特效展示等）
+## Instagram 抓取能力
 
-## 使用示例
+### 已验证（2026-04-07）
+- **无需登录**即可从标签探索页获取视频 CDN 链接
+- 每个标签页可获取 **12 个视频**的直接下载链接
+- 下载速度：3 个视频 < 7 秒
+- 抽帧速度：9帧/视频 < 1 秒
 
-### 基础使用（无浏览器）
-```
-用户：[粘贴 Google Doc URL]
-Skill：
-  1. WebFetch 导出文档文本
-  2. WebFetch 抓取 Instagram 标签页（#aivideo, #aicinematic）
-  3. WebSearch 搜索补充趋势
-  4. 生成 6 组视频主题
+### Playwright 配置
+```bash
+pip install playwright opencv-python-headless
+python -m playwright install chromium
 ```
 
-### 完整使用（含浏览器自动化）
+### 使用示例
+```bash
+# 仅获取元数据
+python Scripts/fetch_instagram_video.py seedance --metadata-only
+
+# 下载前 3 个视频
+python Scripts/fetch_instagram_video.py seedance --num 3 --output ig_videos
+
+# 抽帧
+python Scripts/extract_frames.py ig_videos/seedance_0.mp4
 ```
-用户：[粘贴 Google Doc URL]，请使用浏览器模式获取完整视频内容
-Skill：
-  1. WebFetch 导出文档文本
-  2. WebFetch 抓取 Instagram 标签页
-  3. browser-use 登录 Instagram → 打开热门帖 → 截图分析视觉风格
-  4. WebSearch 搜索补充趋势
-  5. 生成 6 组视频主题（含截图参考）
-```
+
+## Seedance 2.0 Prompt 规范
+
+基于 Higgsfield 官方 Prompt Guide 的关键发现：
+
+1. **Seedance prompt 应极简** — 仅包含 camera + subject + action
+2. **复杂视觉描述放在 Popcorn** — 图片生成阶段用长 prompt 锁定构图/色调/材质
+3. **@Reference 系统** — 最多 9 张图 + 3 个视频 + 3 个音频
+4. **风格锚点** — "35mm film, shallow DOF, Roger Deakins" 为官方高频词
