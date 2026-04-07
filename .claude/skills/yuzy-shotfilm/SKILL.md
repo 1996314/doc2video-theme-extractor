@@ -1,113 +1,119 @@
 ---
 name: "Doc2Video Theme Extractor"
-description: "解析文档生成视频主题 → Playwright 抓取 Instagram 热门视频 → OpenCV 抽帧 → Vision 帧分析 → 主视觉 prompt → 九宫格连续描述 → Seedance 2.0 连续视频 prompt。全链路自动化，中英双语输出。"
+description: "解析文档 → 按产品类型自动选择视觉来源 → Playwright 抓取视频 → OpenCV 抽帧 → Vision 帧分析 → 主视觉 prompt → 九宫格连续叙事 → Seedance 2.0 极简 prompt。中英双语。"
 ---
 
-# Doc2Video Skill（视觉驱动扩展版）
+# Doc2Video Skill
 
-## 功能
-1. 文档解析：提取主题、功能点、核心卖点
-2. **Playwright 视频抓取**：Headless Chromium 访问 Instagram 标签页，无需登录直接获取视频 CDN 链接并下载
-3. **OpenCV 抽帧**：每个视频提取 9 个关键帧
-4. **Vision 帧分析**：用 AI Vision 分析帧内容，输出视觉结构（主体、镜头、光线、风格）
-5. 主视觉 prompt：融合帧分析结果，输出中英双语 prompt
-6. 九宫格连续文本 prompt：16:9 一张图，9 panel 连续叙事
-7. Seedance 2.0 连续视频 prompt：极简格式（camera + subject + action），按 Higgsfield 官方规范
-8. 校验：自动使用 `validate_prompt` 校验生成 prompt
-
-## 完整链路
+## 流程
 
 ```
 文档 URL
-  │ WebFetch (export?format=txt)
+  │ WebFetch → export?format=txt
   ▼
-提取功能点
+[Step 1] 提取功能点
   │
   ▼
-Playwright headless Chromium ──→ Instagram 标签页（无需登录）
-  │ 获取视频 CDN 链接（12个/页）
-  │ urllib 下载 .mp4
+[Step 2] detect_product_type(doc_text)
+  │ 根据关键词判断产品类型:
+  │ ai_video_generation / ai_portrait_headshot / ai_image_generation
+  │ ai_background_removal / ai_avatar / ai_audio_music
+  │ → 自动选择最佳视觉来源（品牌官网优先，Instagram 标签补充）
   ▼
-OpenCV 抽帧 ──→ 9 帧/视频
-  │
+[Step 3] Playwright headless 抓取视频
+  │ 品牌官网: Higgsfield / Aragon / Secta / Dreamwave / etc.
+  │ Instagram: #seedance / #aibeauty / #aiportrait / etc.
+  │ → 下载 .mp4 到 visual_refs/
   ▼
-Claude Vision 帧分析 ──→ 视觉结构 JSON
-  │ (主体、镜头路径、光线、风格、叙事弧线)
+[Step 4] OpenCV 抽帧 → 9 帧/视频
   ▼
-generate_main_visual() ──→ 中英双语 prompt
+[Step 5] Vision 帧分析 → 视觉结构 JSON
+  │ Cursor agent 用 Read 工具查看 .jpg 帧
+  │ 输出: subject, transformation, camera_path, lighting, style
   ▼
-generate_storyboard() ──→ 九宫格连续叙事 prompt
+[Step 6] generate_main_visual() → 中英双语 prompt
   ▼
-人工确认风格 ✅
+[Step 7] generate_storyboard() → 九宫格连续叙事 prompt
   ▼
-generate_seedance_prompt() ──→ Seedance 2.0 极简 prompt
+[Step 8] ⏸ 人工确认风格
+  ▼
+[Step 9] generate_seedance_prompt() → Seedance 2.0 极简 prompt
   │ Popcorn 长 prompt (图片) + Seedance 短 prompt (视频)
-  │ @Image / @Video / @Audio 引用
   ▼
 Production-Ready Output
 ```
 
 ## 输入
+
 | 输入 | 类型 | 描述 |
 |------|------|------|
-| 文档 URL / 文件 | Google Doc / Word | 待解析主题 |
-| 风格 | str | 视频整体风格 |
-| 关键词 / 标签 | list | 用于 Instagram 抓取的标签（如 seedance, higgsfield） |
+| 文档 URL | Google Doc URL | 待解析的产品页内容 |
+| 视频文件 | .mp4 | 可选：用户直接提供视频，跳过抓取 |
+| 风格 | str | 可选：视频整体风格 |
 | 驱动逻辑 | str | 空间 / 动作 / 动能 / 形态 / 意识 |
-| 视频文件 | .mp4 | 可选：用户直接提供视频跳过抓取步骤 |
 
 ## 输出
+
 | 输出 | 类型 | 描述 |
 |------|------|------|
-| 视觉结构 | JSON | 帧分析结果：主体、镜头、光线、风格、叙事 |
-| 主视觉 prompt | dict | {"cn": ..., "en": ...} |
-| 九宫格 prompt | dict | {"cn": ..., "en": ...} — 一条连续叙事 |
-| Seedance prompt | str | 极简格式：Popcorn 长 prompt + Seedance 短 prompt |
-| 校验报告 | dict | 各阶段校验结果 |
+| 视觉结构 | JSON | 帧分析: subject, camera, lighting, style |
+| 主视觉 prompt | {cn, en} | 中英双语主视觉描述 |
+| 九宫格 prompt | {cn, en} | 连续叙事，16:9 分镜图用 |
+| Seedance prompt | str | 极简格式 (camera + subject + action) |
+| 校验报告 | JSON | 长度/时序/镜头/冲突检查 |
 
-## 脚本说明
+## 脚本
 
-| 脚本 | 功能 | 依赖 |
-|------|------|------|
-| `fetch_instagram_video.py` | Playwright headless 抓取 Instagram 视频 | playwright, chromium |
-| `extract_frames.py` | OpenCV 抽取关键帧 | opencv-python-headless |
-| `analyze_frames.py` | AI Vision 帧分析 → 视觉结构 | Claude Vision / OpenAI Vision |
-| `generate_main_visual.py` | 帧分析 → 主视觉 prompt | validate_prompt |
-| `generate_storyboard.py` | 主视觉 → 九宫格连续叙事 | validate_prompt |
-| `generate_seedance_prompt.py` | 九宫格 → Seedance 2.0 连续 prompt | validate_prompt |
-| `run_pipeline.py` | 全流程编排 | 以上所有 |
+| 文件 | 功能 |
+|------|------|
+| `run_pipeline.py` | 全流程编排，CLI 入口 |
+| `fetch_visual_references.py` | 统一抓取：品牌官网 + Instagram（Playwright） |
+| `extract_frames.py` | OpenCV 抽帧 |
+| `analyze_frames.py` | 帧分析结构 + Vision 辅助接口 |
+| `generate_main_visual.py` | 视觉结构 → 主视觉 prompt |
+| `generate_storyboard.py` | 主视觉 → 九宫格连续叙事 |
+| `generate_seedance_prompt.py` | 九宫格 → Seedance 2.0 prompt |
+| `validate_prompt.py` | prompt 校验（长度/时序/镜头/冲突） |
 
-## Instagram 抓取能力
+## 动态搜索策略
 
-### 已验证（2026-04-07）
-- **无需登录**即可从标签探索页获取视频 CDN 链接
-- 每个标签页可获取 **12 个视频**的直接下载链接
-- 下载速度：3 个视频 < 7 秒
-- 抽帧速度：9帧/视频 < 1 秒
+| 产品类型 | 优先来源 |
+|---------|---------|
+| ai_video_generation | Higgsfield Seedance 2.0 → Community → #seedance |
+| ai_portrait_headshot | HeadshotPro → Aragon → Secta → Dreamwave → #aibeauty |
+| ai_image_generation | Midjourney → Freepik → #aiart |
+| ai_background_removal | Remove.bg → Canva → #backgroundremover |
+| ai_avatar | Higgsfield Influencer → #aiavatar |
+| ai_audio_music | Suno → ElevenLabs → #aimusic |
 
-### Playwright 配置
+## 安装
+
 ```bash
 pip install playwright opencv-python-headless
 python -m playwright install chromium
 ```
 
-### 使用示例
+## CLI 示例
+
 ```bash
-# 仅获取元数据
-python Scripts/fetch_instagram_video.py seedance --metadata-only
+# 从文档 URL 自动跑全流程
+python Scripts/run_pipeline.py \
+  --doc-url "https://docs.google.com/document/d/xxx/edit" \
+  --num 3 --theme "AI Headshot" --driver "形态驱动"
 
-# 下载前 3 个视频
-python Scripts/fetch_instagram_video.py seedance --num 3 --output ig_videos
+# 直接抓取指定 Instagram 标签
+python Scripts/fetch_visual_references.py --tag seedance --num 5
 
-# 抽帧
-python Scripts/extract_frames.py ig_videos/seedance_0.mp4
+# 直接抓取指定网站
+python Scripts/fetch_visual_references.py --url https://www.aragon.ai --num 3
+
+# 使用本地视频跳过抓取
+python Scripts/run_pipeline.py --video path/to/video.mp4 --theme "my theme"
 ```
 
 ## Seedance 2.0 Prompt 规范
 
-基于 Higgsfield 官方 Prompt Guide 的关键发现：
-
-1. **Seedance prompt 应极简** — 仅包含 camera + subject + action
-2. **复杂视觉描述放在 Popcorn** — 图片生成阶段用长 prompt 锁定构图/色调/材质
-3. **@Reference 系统** — 最多 9 张图 + 3 个视频 + 3 个音频
-4. **风格锚点** — "35mm film, shallow DOF, Roger Deakins" 为官方高频词
+1. **Seedance prompt 极简** — 仅 camera + subject + action
+2. **复杂描述放 Popcorn** — 图片阶段锁定构图/色调/材质
+3. **@Reference 系统** — 最多 9 图 + 3 视频 + 3 音频
+4. **风格锚点** — "35mm film, shallow DOF, Roger Deakins"
